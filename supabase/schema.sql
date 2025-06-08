@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS budget_settings (
   wants_percentage INTEGER DEFAULT 20,
   savings_percentage INTEGER DEFAULT 20,
   income_goal DECIMAL(10,2) DEFAULT 30000,
+  needs_goal DECIMAL(10,2) DEFAULT 18000,
+  wants_goal DECIMAL(10,2) DEFAULT 6000,
+  savings_goal DECIMAL(10,2) DEFAULT 6000,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

@@ -157,17 +157,17 @@ export default function Home() {
       // Update state
       setData({
         income: { current: totalIncome, goal: budgetSettings.income_goal },
-        needs: { 
-          current: totalFixedExpenses, 
-          goal: budgetSettings.income_goal * (budgetSettings.needs_percentage / 100) 
+        needs: {
+          current: totalFixedExpenses,
+          goal: budgetSettings.needs_goal || (budgetSettings.income_goal * (budgetSettings.needs_percentage / 100))
         },
-        wants: { 
-          current: totalWants, 
-          goal: budgetSettings.income_goal * (budgetSettings.wants_percentage / 100) 
+        wants: {
+          current: totalWants,
+          goal: budgetSettings.wants_goal || (budgetSettings.income_goal * (budgetSettings.wants_percentage / 100))
         },
-        savings: { 
-          current: totalSavings, 
-          goal: budgetSettings.income_goal * (budgetSettings.savings_percentage / 100) 
+        savings: {
+          current: totalSavings,
+          goal: budgetSettings.savings_goal || (budgetSettings.income_goal * (budgetSettings.savings_percentage / 100))
         },
         dailyFood: { current: totalDailyFood, goal: 0 }
       });
@@ -761,11 +761,19 @@ export default function Home() {
     const total = tempPercentageAllocation.needs + tempPercentageAllocation.wants + tempPercentageAllocation.savings;
     if (total === 100) {
       try {
+        // Calculate new goals based on percentages
+        const newNeedsGoal = data.income.goal * (tempPercentageAllocation.needs / 100);
+        const newWantsGoal = data.income.goal * (tempPercentageAllocation.wants / 100);
+        const newSavingsGoal = data.income.goal * (tempPercentageAllocation.savings / 100);
+
         await updateBudgetSettings({
           needs: tempPercentageAllocation.needs,
           wants: tempPercentageAllocation.wants,
           savings: tempPercentageAllocation.savings,
-          income_goal: data.income.goal
+          income_goal: data.income.goal,
+          needs_goal: newNeedsGoal,
+          wants_goal: newWantsGoal,
+          savings_goal: newSavingsGoal
         });
         
         setPercentageAllocation({ ...tempPercentageAllocation });
@@ -938,6 +946,18 @@ export default function Home() {
               wants: percentageAllocation.wants,
               savings: percentageAllocation.savings,
               income_goal: amount
+            });
+          } else if (type === 'needs') {
+            await updateBudgetSettings({
+              needs_goal: amount
+            });
+          } else if (type === 'wants') {
+            await updateBudgetSettings({
+              wants_goal: amount
+            });
+          } else if (type === 'savings') {
+            await updateBudgetSettings({
+              savings_goal: amount
             });
           }
           
