@@ -90,6 +90,7 @@ export default function Home() {
 
   // Loading state
   const [isLoading, setIsLoading] = useState(true);
+  const [isDataLoadedFromDB, setIsDataLoadedFromDB] = useState(false);
 
   // Load initial data from Supabase
   useEffect(() => {
@@ -102,6 +103,14 @@ export default function Home() {
       
       // Load budget settings
       const budgetSettings = await getBudgetSettings();
+      
+      // Check if we have custom goals from database
+      const hasCustomGoals = budgetSettings.needs_goal !== undefined &&
+                            budgetSettings.wants_goal !== undefined &&
+                            budgetSettings.savings_goal !== undefined;
+      
+      setIsDataLoadedFromDB(hasCustomGoals);
+      
       setPercentageAllocation({
         needs: budgetSettings.needs_percentage,
         wants: budgetSettings.wants_percentage,
@@ -316,15 +325,18 @@ export default function Home() {
     return Object.values(groups);
   };
 
-  // Update goals when income goal or percentage allocation changes
+  // Update goals when income goal or percentage allocation changes (only if not loaded from database)
   useEffect(() => {
+    // Skip if we're still loading or if goals are already set from database
+    if (isLoading || isDataLoadedFromDB) return;
+    
     setData(prev => ({
       ...prev,
       needs: { ...prev.needs, goal: prev.income.goal * (percentageAllocation.needs / 100) },
       wants: { ...prev.wants, goal: prev.income.goal * (percentageAllocation.wants / 100) },
       savings: { ...prev.savings, goal: prev.income.goal * (percentageAllocation.savings / 100) }
     }));
-  }, [data.income.goal, percentageAllocation]);
+  }, [data.income.goal, percentageAllocation, isLoading, isDataLoadedFromDB]);
 
   // Update daily food goal when income or fixed expenses change
   useEffect(() => {
@@ -1354,8 +1366,8 @@ export default function Home() {
                 <div className={styles.cardActions}>
                   <button
                     className={styles.actionBtn}
-                    onClick={() => setShowSettingsModal(true)}
-                    title="ตั้งเป้าหมายหลัก"
+                    onClick={() => handleSetGoal('needs')}
+                    title="ตั้งเป้าหมายค่าใช้จ่ายคงที่"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <circle cx="12" cy="12" r="10"/>
@@ -1386,8 +1398,23 @@ export default function Home() {
                       {formatCurrency(calculateAllFixedExpensesTotal('current'))}
                     </span>
                     <span className={styles.totalGoal}>
-                      / {formatCurrency(calculateAllFixedExpensesTotal('goal'))}
+                      / {formatCurrency(data.needs.goal)}
                     </span>
+                  </div>
+                  
+                  {/* Progress bar for fixed expenses */}
+                  <div className={styles.progressBar}>
+                    <div
+                      className={styles.progressFill}
+                      style={{
+                        width: `${getProgressPercentage(calculateAllFixedExpensesTotal('current'), data.needs.goal)}%`,
+                        backgroundColor: '#9C27B0'
+                      }}
+                    ></div>
+                  </div>
+                  
+                  <div className={styles.progressText}>
+                    {getProgressPercentage(calculateAllFixedExpensesTotal('current'), data.needs.goal).toFixed(1)}%
                   </div>
                 </div>
 
