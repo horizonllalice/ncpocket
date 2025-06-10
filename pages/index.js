@@ -68,6 +68,7 @@ export default function Home() {
   const [showResetModal, setShowResetModal] = useState(null);
   const [inputValue, setInputValue] = useState("");
   const [showCongrats, setShowCongrats] = useState(false);
+  const [error, setError] = useState(null);
 
   // Temporary percentage state for modal
   const [tempPercentageAllocation, setTempPercentageAllocation] = useState({
@@ -90,7 +91,6 @@ export default function Home() {
 
   // Loading state
   const [isLoading, setIsLoading] = useState(true);
-  const [isDataLoadedFromDB, setIsDataLoadedFromDB] = useState(false);
 
   // Load initial data from Supabase
   useEffect(() => {
@@ -100,22 +100,15 @@ export default function Home() {
   const loadInitialData = async () => {
     try {
       setIsLoading(true);
-      
+
       // Load budget settings
       const budgetSettings = await getBudgetSettings();
-      
-      // Check if we have custom goals from database
-      const hasCustomGoals = budgetSettings.needs_goal !== undefined &&
-                            budgetSettings.wants_goal !== undefined &&
-                            budgetSettings.savings_goal !== undefined;
-      
-      setIsDataLoadedFromDB(hasCustomGoals);
-      
       setPercentageAllocation({
         needs: budgetSettings.needs_percentage,
         wants: budgetSettings.wants_percentage,
         savings: budgetSettings.savings_percentage
       });
+
       
       // Load income records
       const incomeRecords = await getIncomeRecords();
@@ -168,15 +161,15 @@ export default function Home() {
         income: { current: totalIncome, goal: budgetSettings.income_goal },
         needs: {
           current: totalFixedExpenses,
-          goal: budgetSettings.needs_goal || (budgetSettings.income_goal * (budgetSettings.needs_percentage / 100))
+          goal: budgetSettings.needs_goal || 0
         },
         wants: {
           current: totalWants,
-          goal: budgetSettings.wants_goal || (budgetSettings.income_goal * (budgetSettings.wants_percentage / 100))
+          goal: budgetSettings.wants_goal || 0
         },
         savings: {
           current: totalSavings,
-          goal: budgetSettings.savings_goal || (budgetSettings.income_goal * (budgetSettings.savings_percentage / 100))
+          goal: budgetSettings.savings_goal || 0
         },
         dailyFood: { current: totalDailyFood, goal: 0 }
       });
@@ -325,30 +318,7 @@ export default function Home() {
     return Object.values(groups);
   };
 
-  // Update goals when income goal or percentage allocation changes (only if not loaded from database)
-  useEffect(() => {
-    // Skip if we're still loading or if goals are already set from database
-    if (isLoading || isDataLoadedFromDB) return;
-    
-    setData(prev => ({
-      ...prev,
-      needs: { ...prev.needs, goal: prev.income.goal * (percentageAllocation.needs / 100) },
-      wants: { ...prev.wants, goal: prev.income.goal * (percentageAllocation.wants / 100) },
-      savings: { ...prev.savings, goal: prev.income.goal * (percentageAllocation.savings / 100) }
-    }));
-  }, [data.income.goal, percentageAllocation, isLoading, isDataLoadedFromDB]);
 
-  // Update daily food goal when income or fixed expenses change
-  useEffect(() => {
-    const totalFixedExpenses = calculateAllFixedExpensesTotal('goal');
-    const needsGoal = data.income.goal * (percentageAllocation.needs / 100);
-    const remainingForFood = Math.max(0, needsGoal - totalFixedExpenses);
-    
-    setData(prev => ({
-      ...prev,
-      dailyFood: { ...prev.dailyFood, goal: remainingForFood }
-    }));
-  }, [data.income.goal, fixedExpenses, percentageAllocation.needs]);
 
   // Update needs current amount based on fixed expenses
   useEffect(() => {
@@ -360,11 +330,13 @@ export default function Home() {
   }, [fixedExpenses]);
 
   const handleSetGoal = (type) => {
+    setError(null);
     setShowModal({ type, action: 'goal' });
     setInputValue("");
   };
 
   const handleAddMoney = (type) => {
+    setError(null);
     setShowModal({ type, action: 'add', isExpense: false });
     setInputValue("");
     if (type === 'wants') {
@@ -773,26 +745,17 @@ export default function Home() {
     const total = tempPercentageAllocation.needs + tempPercentageAllocation.wants + tempPercentageAllocation.savings;
     if (total === 100) {
       try {
-        // Calculate new goals based on percentages
-        const newNeedsGoal = data.income.goal * (tempPercentageAllocation.needs / 100);
-        const newWantsGoal = data.income.goal * (tempPercentageAllocation.wants / 100);
-        const newSavingsGoal = data.income.goal * (tempPercentageAllocation.savings / 100);
-
+        // Update budget settings without recalculating goals
         await updateBudgetSettings({
-          needs: tempPercentageAllocation.needs,
-          wants: tempPercentageAllocation.wants,
-          savings: tempPercentageAllocation.savings,
-          income_goal: data.income.goal,
-          needs_goal: newNeedsGoal,
-          wants_goal: newWantsGoal,
-          savings_goal: newSavingsGoal
+          needs_percentage: tempPercentageAllocation.needs,
+          wants_percentage: tempPercentageAllocation.wants,
+          savings_percentage: tempPercentageAllocation.savings
         });
         
         setPercentageAllocation({ ...tempPercentageAllocation });
         setShowPercentageModal(false);
       } catch (error) {
-        console.error('Error updating budget settings:', error);
-        alert('เกิดข้อผิดพลาดในการบันทึกการตั้งค่า');
+        console.error('Failed to save percentages:', error);
       }
     } else {
       alert(`รวมเปอร์เซ็นต์ต้องเท่ากับ 100% (ปัจจุบัน: ${total}%)`);
@@ -871,6 +834,8 @@ export default function Home() {
   ];
 
   const handleSubmit = async () => {
+    if (!showModal) return;
+
     const amount = parseFloat(inputValue);
     if (isNaN(amount) || amount <= 0) return;
     
@@ -973,39 +938,33 @@ export default function Home() {
             });
           }
           
-          setData(prev => ({
-            ...prev,
-            [type]: { ...prev[type], goal: amount }
-          }));
+          // Reload data from the database to reflect the changes
+          await loadInitialData();
         } else if (action === 'add') {
           if (type === 'income') {
-            // When adding income, distribute automatically based on user settings
             await addIncomeRecord(amount);
-            
-            const needsAmount = amount * (percentageAllocation.needs / 100);
             const wantsAmount = amount * (percentageAllocation.wants / 100);
             const savingsAmount = amount * (percentageAllocation.savings / 100);
-
             await addWantsTransaction(wantsAmount);
             await addSavingsTransaction(savingsAmount);
-
             setData(prev => ({
               ...prev,
               income: { ...prev.income, current: prev.income.current + amount },
               wants: { ...prev.wants, current: prev.wants.current + wantsAmount },
               savings: { ...prev.savings, current: prev.savings.current + savingsAmount }
             }));
-
-            // Add to history for income
             addToHistory('income', amount);
-            // Add to history for wants and savings (auto-distributed)
             addToHistory('wants', wantsAmount);
             addToHistory('savings', savingsAmount);
+
+            const newCurrent = data.income.current + amount;
+            if (newCurrent >= data.income.goal && data.income.goal > 0) {
+              setShowCongrats(true);
+              setTimeout(() => setShowCongrats(false), 3000);
+            }
           } else if (type === 'wants') {
-            // Check if this is an expense (from minus button) or addition (from plus button)
             const isExpense = showModal?.isExpense === true;
             const transactionAmount = isExpense ? -amount : amount;
-            
             await addWantsTransaction(transactionAmount, wantsDescription);
             setData(prev => ({
               ...prev,
@@ -1014,8 +973,13 @@ export default function Home() {
                 current: prev[type].current + transactionAmount
               }
             }));
-            // Add to history with appropriate amount and description
             addToHistory(type, transactionAmount, undefined, wantsDescription);
+
+            const newCurrent = data.wants.current + transactionAmount;
+            if (newCurrent >= data.wants.goal && data.wants.goal > 0) {
+              setShowCongrats(true);
+              setTimeout(() => setShowCongrats(false), 3000);
+            }
           } else if (type === 'savings') {
             await addSavingsTransaction(amount);
             setData(prev => ({
@@ -1023,6 +987,12 @@ export default function Home() {
               [type]: { ...prev[type], current: prev[type].current + amount }
             }));
             addToHistory(type, amount);
+
+            const newCurrent = data.savings.current + amount;
+            if (newCurrent >= data.savings.goal && data.savings.goal > 0) {
+              setShowCongrats(true);
+              setTimeout(() => setShowCongrats(false), 3000);
+            }
           } else if (type === 'dailyFood') {
             await addDailyFoodTransaction(amount);
             setData(prev => ({
@@ -1030,23 +1000,22 @@ export default function Home() {
               [type]: { ...prev[type], current: prev[type].current + amount }
             }));
             addToHistory(type, amount);
-          }
 
-          // Check if goal is reached
-          const newCurrent = type === 'income' ? data[type].current + amount : data[type].current + amount;
-          if (newCurrent >= data[type].goal && data[type].goal > 0) {
-            setShowCongrats(true);
-            setTimeout(() => setShowCongrats(false), 3000);
+            const newCurrent = data.dailyFood.current + amount;
+            if (newCurrent >= data.dailyFood.goal && data.dailyFood.goal > 0) {
+              setShowCongrats(true);
+              setTimeout(() => setShowCongrats(false), 3000);
+            }
           }
         }
       }
-    } catch (error) {
-      console.error('Error in handleSubmit:', error);
-      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+    } catch (err) {
+      console.error('Detailed error in handleSubmit:', err);
+      setError('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+    } finally {
+      setShowModal(null);
+      setInputValue("");
     }
-
-    setShowModal(null);
-    setInputValue("");
   };
 
   const formatCurrency = (amount) => {
@@ -1366,8 +1335,8 @@ export default function Home() {
                 <div className={styles.cardActions}>
                   <button
                     className={styles.actionBtn}
-                    onClick={() => handleSetGoal('needs')}
-                    title="ตั้งเป้าหมายค่าใช้จ่ายคงที่"
+                    onClick={() => setShowSettingsModal(true)}
+                    title="ตั้งเป้าหมายหลัก"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <circle cx="12" cy="12" r="10"/>
@@ -1398,23 +1367,8 @@ export default function Home() {
                       {formatCurrency(calculateAllFixedExpensesTotal('current'))}
                     </span>
                     <span className={styles.totalGoal}>
-                      / {formatCurrency(data.needs.goal)}
+                      / {formatCurrency(calculateAllFixedExpensesTotal('goal'))}
                     </span>
-                  </div>
-                  
-                  {/* Progress bar for fixed expenses */}
-                  <div className={styles.progressBar}>
-                    <div
-                      className={styles.progressFill}
-                      style={{
-                        width: `${getProgressPercentage(calculateAllFixedExpensesTotal('current'), data.needs.goal)}%`,
-                        backgroundColor: '#9C27B0'
-                      }}
-                    ></div>
-                  </div>
-                  
-                  <div className={styles.progressText}>
-                    {getProgressPercentage(calculateAllFixedExpensesTotal('current'), data.needs.goal).toFixed(1)}%
                   </div>
                 </div>
 
@@ -1422,9 +1376,7 @@ export default function Home() {
                 <div className={styles.expensesList}>
                   {fixedExpenses.map((expense) => {
                     const hasSubItems = expense.subItems && expense.subItems.length > 0;
-                    const totalCurrent = calculateExpenseTotal(expense, 'current');
-                    const totalGoal = calculateExpenseTotal(expense, 'goal');
-                    const isCompleted = totalCurrent >= totalGoal && totalGoal > 0;
+                    const isCompleted = calculateExpenseTotal(expense, 'current') >= calculateExpenseTotal(expense, 'goal') && calculateExpenseTotal(expense, 'goal') > 0;
                     const isExpanded = expandedExpenses[expense.id];
                     
                     return (
@@ -1460,7 +1412,7 @@ export default function Home() {
                                 </button>
                                 <button
                                   className={styles.expenseBtn}
-                                  onClick={() => handleAddExpense(expense.id)}
+                                  onClick={() => setShowModal({ type: 'expense', action: 'add', expenseId: expense.id, isExpense: false })}
                                   title="เพิ่มเงิน"
                                 >
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -1475,11 +1427,9 @@ export default function Home() {
                         
                         <div className={styles.expenseAmounts}>
                           <span className={styles.expenseCurrent}>
-                            {formatCurrency(totalCurrent)}
+                            {formatCurrency(calculateExpenseTotal(expense, 'current'))}
                           </span>
-                          <span className={styles.expenseGoal}>
-                            / {formatCurrency(totalGoal)}
-                          </span>
+                          <span className={styles.expenseGoal}> / {formatCurrency(calculateExpenseTotal(expense, 'goal'))}</span>
                         </div>
 
                         {/* Sub-items */}
@@ -1541,14 +1491,14 @@ export default function Home() {
                           <div
                             className={styles.expenseProgressFill}
                             style={{
-                              width: `${getProgressPercentage(expense.current, expense.goal)}%`,
+                              width: `${getProgressPercentage(calculateExpenseTotal(expense, 'current'), calculateExpenseTotal(expense, 'goal'))}%`,
                               backgroundColor: '#9C27B0'
                             }}
                           ></div>
                         </div>
                         
                         <div className={styles.expenseProgressText}>
-                          {getProgressPercentage(expense.current, expense.goal).toFixed(1)}%
+                          {getProgressPercentage(calculateExpenseTotal(expense, 'current'), calculateExpenseTotal(expense, 'goal')).toFixed(1)}%
                         </div>
                       </div>
                     </div>
