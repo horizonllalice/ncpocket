@@ -917,29 +917,31 @@ export default function Home() {
         }
       } else {
         if (action === 'goal') {
-          if (type === 'income') {
-            await updateBudgetSettings({
-              needs: percentageAllocation.needs,
-              wants: percentageAllocation.wants,
-              savings: percentageAllocation.savings,
-              income_goal: amount
-            });
-          } else if (type === 'needs') {
-            await updateBudgetSettings({
-              needs_goal: amount
-            });
-          } else if (type === 'wants') {
-            await updateBudgetSettings({
-              wants_goal: amount
-            });
-          } else if (type === 'savings') {
-            await updateBudgetSettings({
-              savings_goal: amount
-            });
+          if (type === 'wants' || type === 'savings') {
+            // For wants and savings, update DB and local state without full reload
+            const key = `${type}_goal`;
+            await updateBudgetSettings({ [key]: amount });
+            setData(prev => ({
+              ...prev,
+              [type]: { ...prev[type], goal: amount }
+            }));
+          } else {
+            // For other goals (income, needs), use the existing logic with full reload
+            if (type === 'income') {
+              await updateBudgetSettings({
+                needs: percentageAllocation.needs,
+                wants: percentageAllocation.wants,
+                savings: percentageAllocation.savings,
+                income_goal: amount
+              });
+            } else if (type === 'needs') {
+              await updateBudgetSettings({
+                needs_goal: amount
+              });
+            }
+            // Reload data from the database to reflect the changes
+            await loadInitialData();
           }
-          
-          // Reload data from the database to reflect the changes
-          await loadInitialData();
         } else if (action === 'add') {
           if (type === 'income') {
             await addIncomeRecord(amount);
